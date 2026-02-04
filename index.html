@@ -130,6 +130,18 @@ body {
     z-index:2;
 }
 
+button {
+    margin-top: 40px;
+    padding: 15px 25px;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: 15px;
+    border: none;
+    background: black;
+    color: white;
+    cursor: pointer;
+}
+
 /* HESITATION OVERLAY */
 #hesitation {
     position: absolute;
@@ -142,6 +154,8 @@ body {
     align-items: center;
     justify-content: center;
     z-index: 999;
+    padding: 24px;
+    text-align: center;
 }
 </style>
 </head>
@@ -153,7 +167,8 @@ body {
 <!-- SCREEN 1 -->
 <div class="screen active swipe-screen" id="screen1">
     <div class="question">Do you Love me?</div>
-    <div class="card swipe-card" data-yes="screen2" data-no="basic">
+    <!-- reverse-swipe: LEFT = YES, RIGHT = TRY AGAIN -->
+    <div class="card swipe-card reverse-swipe" data-yes="screen2" data-no="basic">
         <div class="choices">
             <div class="choice yes">Yes</div>
             <div class="choice no">No</div>
@@ -164,7 +179,8 @@ body {
 <!-- SCREEN 2 -->
 <div class="screen swipe-screen" id="screen2">
     <div class="question">How Much Do I Love You?</div>
-    <div class="card swipe-card" data-yes="screen3" data-no="bread">
+    <!-- reverse-swipe: LEFT = YES, RIGHT = TRY AGAIN -->
+    <div class="card swipe-card reverse-swipe" data-yes="screen3" data-no="bread">
         <div class="choices">
             <div class="choice yes">More Than Icuras Loved What The Sun Represented…</div>
             <div class="choice no">More Than Sliced Bread…</div>
@@ -239,45 +255,83 @@ function clearHesitation() {
     clearTimeout(hesitationTimer);
 }
 
-/* SWIPE LOGIC */
-document.querySelectorAll('.swipe-screen').forEach(() => startHesitation());
+/* Start hesitation anytime we land on a swipe-screen */
+function onScreenEntered() {
+    startHesitation();
+}
 
+/* SWIPE LOGIC */
 document.querySelectorAll('.swipe-card').forEach(card => {
     card.addEventListener('touchstart', e => {
+        // If hesitation overlay is showing, ignore swipes
+        if (document.getElementById('hesitation').style.display === 'flex') return;
+
         startX = e.touches[0].clientX;
         clearHesitation();
+        card.style.transition = "none";
     });
 
     card.addEventListener('touchmove', e => {
+        if (document.getElementById('hesitation').style.display === 'flex') return;
+
         let dx = e.touches[0].clientX - startX;
         card.style.transform = `translateX(${dx}px) rotate(${dx * 0.05}deg)`;
     });
 
     card.addEventListener('touchend', e => {
+        if (document.getElementById('hesitation').style.display === 'flex') return;
+
         let dx = e.changedTouches[0].clientX - startX;
-        if (dx > 120) commitSwipe(card, true);
-        else if (dx < -120) commitSwipe(card, false);
+        card.style.transition = "transform 0.25s ease";
+
+        // Tinder-ish feel: threshold commit, otherwise snap back
+        if (dx > 120) commitSwipe(card, true);       // moved right
+        else if (dx < -120) commitSwipe(card, false); // moved left
         else {
-            card.style.transform = "translateX(0)";
-            startHesitation();
+            card.style.transform = "translateX(0) rotate(0deg)";
+            onScreenEntered();
         }
     });
 });
 
-function commitSwipe(card, yes) {
-    card.style.transform = `translateX(${yes ? 1200 : -1200}px) rotate(${yes ? 25 : -25}deg)`;
-    yes ? hapticYes() : hapticNo();
+/**
+ * yes param here means "swiped right" (true) or "swiped left" (false),
+ * then we map it to the intended action based on reverse-swipe.
+ */
+function commitSwipe(card, swipedRight) {
+    const reversed = card.classList.contains('reverse-swipe');
+
+    // Default mapping:
+    //   right => YES, left => NO
+    // Reversed mapping (for Q1 & Q2):
+    //   right => NO (try again), left => YES
+    const isYes = reversed ? !swipedRight : swipedRight;
+
+    // Animate off-screen in the swipe direction the user actually did
+    card.style.transition = "transform 0.3s ease";
+    card.style.transform = `translateX(${swipedRight ? 1200 : -1200}px) rotate(${swipedRight ? 25 : -25}deg)`;
+
+    isYes ? hapticYes() : hapticNo();
 
     setTimeout(() => {
-        yes ? goTo(card.dataset.yes) : showGameOver(card.dataset.no);
+        if (isYes) goTo(card.dataset.yes);
+        else showGameOver(card.dataset.no);
+
+        // Reset card for when user returns
+        card.style.transition = "";
         card.style.transform = "";
     }, 300);
 }
 
 function goTo(id) {
+    clearHesitation();
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
-    startHesitation();
+
+    // Only run hesitation on "swipe-screen" screens
+    if (document.getElementById(id).classList.contains('swipe-screen')) {
+        onScreenEntered();
+    }
 }
 
 function showGameOver(type) {
@@ -290,11 +344,17 @@ function showGameOver(type) {
 
 function restart() {
     noClicks = 0;
+    document.getElementById('finalNo').style.display = "block";
+    document.getElementById('finalNo').style.transform = "";
+    document.getElementById('finalYes').style = "";
     goTo('screen1');
 }
 
 /* FINAL QUESTION */
 document.getElementById('finalNo').onclick = () => {
+    // If hesitation overlay is showing, ignore clicks
+    if (document.getElementById('hesitation').style.display === 'flex') return;
+
     hapticNo();
     clearHesitation();
     noClicks++;
@@ -311,10 +371,13 @@ document.getElementById('finalNo').onclick = () => {
         yes.style.height = "100vh";
         yes.style.fontSize = "3rem";
     }
-    startHesitation();
+
+    onScreenEntered();
 };
 
 document.getElementById('finalYes').onclick = () => {
+    if (document.getElementById('hesitation').style.display === 'flex') return;
+
     hapticYes();
     clearHesitation();
     goTo('finalScreen');
@@ -332,6 +395,9 @@ function spawnHearts() {
         setTimeout(() => heart.remove(), 5000);
     }
 }
+
+// Start hesitation on initial screen load (screen1 is a swipe-screen)
+onScreenEntered();
 </script>
 
 </body>
